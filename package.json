@@ -1,0 +1,22 @@
+{
+  "name": "api-only-blog",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node test-harness.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1155.0",
+    "@aws-sdk/lib-dynamodb": "^3.1155.0",
+    "express": "^5.3.0",
+    "marked": "^18.1.1"
+  }
+}

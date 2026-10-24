@@ -1,0 +1,10 @@
+.agents/
+docs/
+node_modules/
+
+.env.prod
+.env.PROD
+config-overrides.js
+GLOSSARY.md
+*.log
+f
