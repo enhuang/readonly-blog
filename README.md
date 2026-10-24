@@ -32,8 +32,6 @@ https://b2.xcloan.com
 
 ```
 
-```
-
 api-only-blog/
 │
 ├── blog-config.js          ← Config source priority + env parsing
