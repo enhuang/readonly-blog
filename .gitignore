@@ -5,6 +5,6 @@ node_modules/
 .env.prod
 .env.PROD
 config-overrides.js
-GLOSSARY.md
+*.md
 *.log
 f

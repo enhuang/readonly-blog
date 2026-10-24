@@ -295,6 +295,9 @@ describe('post-repo', () => {
 
     it('returns only published posts (filters out drafts)', async () => {
       client._commands.query.impl((cmd) => {
+        // FilterExpression moves the status filter to DynamoDB
+        expect(cmd.input.FilterExpression).toBe('status = :published');
+        expect(cmd.input.ExpressionAttributeValues).toEqual({ ':published': 'published' });
         return {
           Items: [
             postItem({ slug: 'p', status: 'published', title: 'Pub', publishedAt: '2025-01-02T00:00:00.000Z', markdown: 'p', chronKey: '2025-01-02T00:00:00.000Z#p' }),

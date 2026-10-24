@@ -173,6 +173,11 @@ function createPostRepo(opts = {}) {
       },
       ScanIndexForward: false,
       Limit: perPage,
+      FilterExpression: 'status = :published',
+      ExpressionAttributeValues: {
+        ':fk': feedKey(),
+        ':published': 'published',
+      },
     };
 
     if (lastChronKey) {
