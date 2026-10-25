@@ -262,6 +262,30 @@ describe('blog-app', () => {
       expect(res._body[0].url).toBe('/post/a');
     });
 
+    it('filters response fields on GET /api/posts', async () => {
+      client.send = () => ({
+        Items: [
+          postItem({
+            slug: 'a',
+            title: 'A',
+            publishedAt: '2025-01-15T10:00:00.000Z',
+            markdown: '# A\n\nFirst para.',
+            chronKey: '2025-01-15T10:00:00.000Z#a',
+          }),
+        ],
+        $metadata: {},
+      });
+      const req = mockReq('GET', '/api/posts?fields=title,slug');
+      req.query = { page: '1', perPage: '10', fields: 'title,slug' };
+      const res = mockRes();
+      await new Promise((resolve) => app(req, res, resolve));
+      await Promise.resolve();
+      expect(res.statusCode).toBe(200);
+      // Only title and slug should be present, no other fields
+      const keys = Object.keys(res._body[0] || {}).sort();
+      expect(keys).toEqual(['slug', 'title']);
+    });
+
     it('handles pagination params', async () => {
       client.send = (cmd) => {
         expect(cmd.input.Limit).toBe(2);
@@ -321,6 +345,19 @@ describe('blog-app', () => {
       expect(res.statusCode).toBe(200);
       expect(res._body).toMatchObject({ slug: 'x', html: expect.anything() });
       expect(res._body.html).toContain('<p>canned body</p>');
+    });
+
+    it('filters response fields on GET /api/posts/:slug', async () => {
+      client.send = () => ({ Items: [postItem({ slug: 'x', markdown: '# X' })], $metadata: {} });
+      const req = mockReq('GET', '/api/posts/x?fields=title,status');
+      req.params = { slug: 'x' };
+      const res = mockRes();
+      await new Promise((resolve) => app(req, res, resolve));
+      await Promise.resolve();
+      expect(res.statusCode).toBe(200);
+      // Only title and status should be present
+      const keys = Object.keys(res._body || {}).sort();
+      expect(keys).toEqual(['status', 'title']);
     });
 
     it('returns 404 for a missing slug', async () => {

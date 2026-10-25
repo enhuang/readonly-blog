@@ -42,12 +42,26 @@ function createApp(repo, renderMarkdown, cfg = {}) {
     }
   });
 
-  app.get('/api/posts', async (req, res, next) => {
+  function filterFields(obj, fields) {
+  if (!fields || fields === '*') return obj;
+  const allowed = new Set(fields.split(',').map(f => f.trim()));
+  const result = {};
+  for (const key of Object.keys(obj)) {
+    if (allowed.has(key)) {
+      result[key] = obj[key];
+    }
+  }
+  return result;
+}
+
+app.get('/api/posts', async (req, res, next) => {
     try {
       const page = Math.max(1, parseInt(req.query.page, 10) || 1);
       const perPage = Math.min(50, Math.max(1, parseInt(req.query.perPage, 10) || 10));
       const posts = await repo.listPosts({ page, perPage });
-      res.json(posts);
+      const fields = req.query.fields;
+      const filteredPosts = posts.map(post => filterFields(post, fields));
+      res.json(filteredPosts);
     } catch (err) {
       next(err);
     }
@@ -60,7 +74,8 @@ function createApp(repo, renderMarkdown, cfg = {}) {
         return res.status(404).json({ error: 'not found' });
       }
       const html = await renderMarkdown(post.markdown);
-      res.json({
+      const fields = req.query.fields;
+      const filtered = filterFields({
         feedKey: post.feedKey,
         chronKey: post.chronKey,
         slug: post.slug,
@@ -69,7 +84,8 @@ function createApp(repo, renderMarkdown, cfg = {}) {
         publishedAt: post.publishedAt,
         markdown: post.markdown,
         html,
-      });
+      }, fields);
+      res.json(filtered);
     } catch (err) {
       next(err);
     }
