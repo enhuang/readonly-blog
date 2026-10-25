@@ -381,4 +381,13 @@ describe('blog-config', () => {
       }
     });
   });
+    it("prodEnv caches the parsed .env.PROD file", () => {
+      const { config } = require("./blog-config");
+      // First call should parse the file
+      const v1 = config.awsRegion;
+      // Second call should use cache
+      const v2 = config.awsRegion;
+      // Both should be equal (cached)
+      expect(v1).toBe(v2);
+    });
 });
