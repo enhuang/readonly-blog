@@ -159,6 +159,26 @@ describe('blog-app', () => {
       expect(res._body).toContain('/post/second');
     });
 
+    it('sets ETag header on GET / feed page', async () => {
+      client.send = (cmd) => ({
+        Items: [
+          postItem({
+            slug: 'first',
+            title: 'First Post',
+            publishedAt: '2025-01-15T10:00:00.000Z',
+            markdown: '# First\n\nFirst paragraph.',
+            chronKey: '2025-01-15T10:00:00.000Z#first',
+          }),
+        ],
+        $metadata: {},
+      });
+      const req = mockReq('GET', '/');
+      const res = mockRes();
+      await new Promise((resolve) => app(req, res, resolve));
+      await Promise.resolve();
+      expect(res.get('etag')).toBeDefined();
+    });
+
     it('renders an empty state when there are no posts', async () => {
       client.send = () => ({ Items: [], $metadata: {} });
       const req = mockReq('GET', '/');
@@ -184,6 +204,19 @@ describe('blog-app', () => {
       expect(res.statusCode).toBe(200);
       expect(res._body).toContain('Hello World');
       expect(res._body).toContain('<p>canned body</p>');
+    });
+
+    it('sets ETag header on GET /post/:slug post page', async () => {
+      client.send = (cmd) => ({
+        Items: [postItem({ slug: 'hello' })],
+        $metadata: {},
+      });
+      const req = mockReq('GET', '/post/hello');
+      req.params = { slug: 'hello' };
+      const res = mockRes();
+      await new Promise((resolve) => app(req, res, resolve));
+      await Promise.resolve();
+      expect(res.get('etag')).toBeDefined();
     });
 
     it('returns 404 for a missing post', async () => {

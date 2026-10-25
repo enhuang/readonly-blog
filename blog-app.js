@@ -1,12 +1,12 @@
 const express = require('express');
 const { config } = require('./blog-config');
 
-let _renderMarkdown = null;
-
 function createApp(repo, renderMarkdown, cfg = {}) {
-  _renderMarkdown = renderMarkdown;
   const app = express();
+  // Enable ETag support for HTTP caching (saves bandwidth for repeat visitors)
+  app.enable('etag'); // adds Etag header to responses
   app.use(express.json({ limit: '1mb' }));
+  let _renderMarkdown = renderMarkdown;
 
   const writeToken = (cfg && cfg.writeToken) || config.writeToken || process.env.BLOG_WRITE_TOKEN || '';
 
