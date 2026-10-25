@@ -168,16 +168,14 @@ function createPostRepo(opts = {}) {
     const params = {
       TableName: tableName,
       KeyConditionExpression: 'feedKey = :fk',
-      ExpressionAttributeValues: {
-        ':fk': feedKey(),
-      },
-      ScanIndexForward: false,
-      Limit: perPage,
-      FilterExpression: 'status = :published',
+      FilterExpression: '#status = :published',
+      ExpressionAttributeNames: { '#status': 'status' },
       ExpressionAttributeValues: {
         ':fk': feedKey(),
         ':published': 'published',
       },
+      ScanIndexForward: false,
+      Limit: perPage,
     };
 
     if (lastChronKey) {

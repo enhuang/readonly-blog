@@ -286,6 +286,98 @@ describe('blog-app', () => {
       expect(keys).toEqual(['slug', 'title']);
     });
 
+    it('returns all fields when fields param is omitted', async () => {
+      client.send = () => ({
+        Items: [
+          postItem({
+            slug: 'a',
+            title: 'A',
+            publishedAt: '2025-01-15T10:00:00.000Z',
+            markdown: '# A\n\nFirst para.',
+            chronKey: '2025-01-15T10:00:00.000Z#a',
+          }),
+        ],
+        $metadata: {},
+      });
+      const req = mockReq('GET', '/api/posts');
+      const res = mockRes();
+      await new Promise((resolve) => app(req, res, resolve));
+      await Promise.resolve();
+      expect(res.statusCode).toBe(200);
+      // All fields should be present when fields param is omitted
+      const keys = Object.keys(res._body[0] || {}).sort();
+      expect(keys).toHaveLength(10); // feedKey, chronKey, slug, title, status, publishedAt, markdown, excerpt, url, html
+    });
+
+    it('returns only specified fields when single field is requested', async () => {
+      client.send = () => ({
+        Items: [
+          postItem({
+            slug: 'a',
+            title: 'A',
+            publishedAt: '2025-01-15T10:00:00.000Z',
+            markdown: '# A\n\nFirst para.',
+            chronKey: '2025-01-15T10:00:00.000Z#a',
+          }),
+        ],
+        $metadata: {},
+      });
+      const req = mockReq('GET', '/api/posts?fields=title');
+      req.query = { page: '1', perPage: '10', fields: 'title' };
+      const res = mockRes();
+      await new Promise((resolve) => app(req, res, resolve));
+      await Promise.resolve();
+      expect(res.statusCode).toBe(200);
+      const keys = Object.keys(res._body[0] || {}).sort();
+      expect(keys).toEqual(['title']);
+    });
+
+    it('returns all fields when fields param is * (wildcard)', async () => {
+      client.send = () => ({
+        Items: [
+          postItem({
+            slug: 'a',
+            title: 'A',
+            publishedAt: '2025-01-15T10:00:00.000Z',
+            markdown: '# A\n\nFirst para.',
+            chronKey: '2025-01-15T10:00:00.000Z#a',
+          }),
+        ],
+        $metadata: {},
+      });
+      const req = mockReq('GET', '/api/posts?fields=*');
+      req.query = { page: '1', perPage: '10', fields: '*' };
+      const res = mockRes();
+      await new Promise((resolve) => app(req, res, resolve));
+      await Promise.resolve();
+      expect(res.statusCode).toBe(200);
+      const keys = Object.keys(res._body[0] || {}).sort();
+      expect(keys).toHaveLength(10);
+    });
+
+    it('handles empty fields param by returning all fields', async () => {
+      client.send = () => ({
+        Items: [
+          postItem({
+            slug: 'a',
+            title: 'A',
+            publishedAt: '2025-01-15T10:00:00.000Z',
+            markdown: '# A\n\nFirst para.',
+            chronKey: '2025-01-15T10:00:00.000Z#a',
+          }),
+        ],
+        $metadata: {},
+      });
+      const req = mockReq('GET', '/api/posts?fields=');
+      req.query = { page: '1', perPage: '10', fields: '' };
+      const res = mockRes();
+      await new Promise((resolve) => app(req, res, resolve));
+      await Promise.resolve();
+      expect(res.statusCode).toBe(200);
+      const keys = Object.keys(res._body[0] || {}).sort();
+      expect(keys).toHaveLength(10);
+    });
+
     it('handles pagination params', async () => {
       client.send = (cmd) => {
         expect(cmd.input.Limit).toBe(2);

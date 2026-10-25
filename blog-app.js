@@ -6,7 +6,7 @@ function createApp(repo, renderMarkdown, cfg = {}) {
   // Enable ETag support for HTTP caching (saves bandwidth for repeat visitors)
   app.enable('etag'); // adds Etag header to responses
   app.use(express.json({ limit: '1mb' }));
-  let _renderMarkdown = renderMarkdown;
+  const _renderMarkdown = renderMarkdown;
 
   const writeToken = (cfg && cfg.writeToken) || config.writeToken || process.env.BLOG_WRITE_TOKEN || '';
 
@@ -130,45 +130,22 @@ app.get('/api/posts', async (req, res, next) => {
     res.status(500).json({ error: 'internal server error' });
   });
 
-  return app;
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function formatDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
-
-async function renderFeedPage(posts) {
-  const renderMarkdown = _renderMarkdown;
-  const items = (await Promise.all(posts.map(async (p) => {
-    const raw = await renderMarkdown(p.markdown);
-    const excerpt = raw
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    const short = excerpt.length > 200 ? excerpt.slice(0, 200).replace(/\s+\S*$/, '') + '…' : excerpt;
-    return `<li>
+  async function renderFeedPage(posts) {
+    const items = (await Promise.all(posts.map(async (p) => {
+      const raw = await _renderMarkdown(p.markdown);
+      const excerpt = raw
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const short = excerpt.length > 200 ? excerpt.slice(0, 200).replace(/\s+\S*$/, '') + '…' : excerpt;
+      return `<li>
       <h2><a href="/post/${escapeHtml(p.slug)}">${escapeHtml(p.title)}</a></h2>
       <time datetime="${escapeHtml(p.publishedAt)}">${formatDate(p.publishedAt)}</time>
       <p>${escapeHtml(short)}</p>
     </li>`;
-  }))).join('');
+    }))).join('');
 
-  return `<!doctype html>
+    return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -208,6 +185,28 @@ async function renderFeedPage(posts) {
   </div>
 </body>
 </html>`;
+  }
+
+  return app;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 }
 
 function renderPostPage(post, html) {

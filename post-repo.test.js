@@ -274,6 +274,27 @@ describe('post-repo', () => {
   });
 
   describe('listPosts', () => {
+    it('queries the feed with descending sort and uses ExpressionAttributeNames for status', async () => {
+      client._commands.query.impl((cmd) => {
+        expect(cmd.input.ScanIndexForward).toBe(false);
+        expect(cmd.input.Limit).toBe(10);
+        expect(cmd.input.ExpressionAttributeNames).toEqual({ '#status': 'status' });
+        expect(cmd.input.FilterExpression).toBe('#status = :published');
+        return {
+          Items: [
+            postItem({ slug: 'b', title: 'B', status: 'published', publishedAt: '2025-01-02T00:00:00.000Z', markdown: 'b', chronKey: '2025-01-02T00:00:00.000Z#b' }),
+            postItem({ slug: 'a', title: 'A', status: 'published', publishedAt: '2025-01-01T00:00:00.000Z', markdown: 'a', chronKey: '2025-01-01T00:00:00.000Z#a' }),
+          ],
+        };
+      });
+
+      const posts = await repo.listPosts({ page: 1, perPage: 10 });
+      expect(posts).toHaveLength(2);
+      expect(posts[0].slug).toBe('b');
+      expect(posts[0].title).toBe('B');
+      expect(posts[1].slug).toBe('a');
+    });
+
     it('queries the feed with descending sort and returns feed items', async () => {
       client._commands.query.impl((cmd) => {
         expect(cmd.input.ScanIndexForward).toBe(false);
