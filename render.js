@@ -45,6 +45,7 @@ async function renderMarkdown(markdown) {
   }
   const marked = await getMarked();
   let html = marked.parse(s);
+  html = sanitizeHtml(html);
   // strip any language class that marked adds to code fences (we do not do syntax highlighting)
   html = html.replace(/<code\s+class=[^>]*>/gi, '<code>');
   // Store in cache with timestamp
@@ -52,6 +53,25 @@ async function renderMarkdown(markdown) {
     _renderCache.set(s, { html, timestamp: Date.now() });
   }
   return html;
+}
+
+// Dependency-free HTML sanitizer for rendered markdown. marked passes raw
+// HTML in the source through untouched, and posts here are assembled from
+// external material, so active content must not survive rendering:
+// - drop script/style/iframe/object/embed/form/link/meta/base elements
+//   together with their contents;
+// - strip inline event-handler attributes (onclick, onerror, ...);
+// - strip javascript:/vbscript:/data:text/html URLs from link-bearing attrs.
+// This is deliberately conservative, not a full DOMPurify replacement.
+function sanitizeHtml(html) {
+  if (html == null) return '';
+  let out = String(html);
+  out = out.replace(/<(script|style|iframe|object|embed|form|link|meta|base|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  out = out.replace(/<(script|style|iframe|object|embed|form|link|meta|base|title)\b[^>]*\/?>/gi, '');
+  out = out.replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  out = out.replace(/\s+(href|src|xlink:href|action|formaction)\s*=\s*"\s*(?:javascript|vbscript|data)\s*:[^"]*"/gi, '');
+  out = out.replace(/\s+(href|src|xlink:href|action|formaction)\s*=\s*'\s*(?:javascript|vbscript|data)\s*:[^']*'/gi, '');
+  return out;
 }
 
 function extractExcerpt(html) {
@@ -110,4 +130,4 @@ function clearPerfStats() {
   cacheMisses = 0;
 }
 
-module.exports = { renderMarkdown, extractExcerpt, clearRenderCache, getCacheHitRate, getCacheMissRate, clearPerfStats };
+module.exports = { renderMarkdown, extractExcerpt, sanitizeHtml, clearRenderCache, getCacheHitRate, getCacheMissRate, clearPerfStats };

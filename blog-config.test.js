@@ -382,12 +382,25 @@ describe('blog-config', () => {
     });
   });
     it("prodEnv caches the parsed .env.PROD file", () => {
-      const { config } = require("./blog-config");
-      // First call should parse the file
-      const v1 = config.awsRegion;
-      // Second call should use cache
-      const v2 = config.awsRegion;
-      // Both should be equal (cached)
-      expect(v1).toBe(v2);
+      // Required vars must be present for createConfig to succeed at all;
+      // provide them via process.env so this test only exercises caching.
+      const saved = [
+        setEnv('AWS_REGION', 'us-west-2'),
+        setEnv('DYNAMODB_TABLE_NAME', 't'),
+        setEnv('BLOG_WRITE_TOKEN', 't'),
+      ];
+      resetState();
+      try {
+        const { config } = require("./blog-config");
+        // First call should parse the file
+        const v1 = config.awsRegion;
+        // Second call should use cache
+        const v2 = config.awsRegion;
+        // Both should be equal (cached)
+        expect(v1).toBe(v2);
+      } finally {
+        restore(saved);
+        resetState();
+      }
     });
 });

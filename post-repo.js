@@ -116,6 +116,9 @@ function createPostRepo(opts = {}) {
 
     const publishedAt = nowISO();
     const effectiveStatus = status || 'published';
+    if (effectiveStatus !== 'draft' && effectiveStatus !== 'published') {
+      throw new Error('status must be one of: draft, published');
+    }
 
     let effectiveSlug = slug;
     if (effectiveSlug) {
