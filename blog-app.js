@@ -3,6 +3,7 @@ const { config } = require('./blog-config');
 
 function createApp(repo, renderMarkdown, cfg = {}) {
   const app = express();
+  app.disable('x-powered-by');
   // Enable ETag support for HTTP caching (saves bandwidth for repeat visitors)
   app.enable('etag'); // adds Etag header to responses
   app.use(express.json({ limit: '1mb' }));
@@ -10,12 +11,22 @@ function createApp(repo, renderMarkdown, cfg = {}) {
 
   const writeToken = (cfg && cfg.writeToken) || config.writeToken || process.env.BLOG_WRITE_TOKEN || '';
 
-  function requireWriteToken(req, res, next) {
+  function hasWriteToken(req) {
     const token = req.get('X-Blog-Token') || req.headers['x-blog-token'];
-    if (!token || token !== writeToken) {
+    return !!token && token === writeToken;
+  }
+
+  function requireWriteToken(req, res, next) {
+    if (!hasWriteToken(req)) {
       return res.status(401).json({ error: 'unauthorized' });
     }
     next();
+  }
+
+  // Drafts are private: without the write token they must look exactly
+  // like a post that does not exist, on both the API and the HTML page.
+  function isVisibleTo(post, req) {
+    return post.status === 'published' || hasWriteToken(req);
   }
 
   app.get('/', async (req, res, next) => {
@@ -31,7 +42,7 @@ function createApp(repo, renderMarkdown, cfg = {}) {
   app.get('/post/:slug', async (req, res, next) => {
     try {
       const post = await repo.getPost(req.params.slug, { tableName: config.tableName });
-      if (!post) {
+      if (!post || !isVisibleTo(post, req)) {
         return res.status(404).type('html').send(renderNotFoundPage());
       }
       const html = await renderMarkdown(post.markdown);
@@ -60,7 +71,15 @@ app.get('/api/posts', async (req, res, next) => {
       const perPage = Math.min(50, Math.max(1, parseInt(req.query.perPage, 10) || 10));
       const posts = await repo.listPosts({ page, perPage });
       const fields = req.query.fields;
-      const filteredPosts = posts.map(post => filterFields(post, fields));
+      // Never expose DynamoDB internals (feedKey/chronKey). Without an
+      // explicit fields request, return the light list shape (no full
+      // markdown) described in the README.
+      const filteredPosts = posts.map(post => {
+        const { feedKey, chronKey, ...rest } = post;
+        if (fields) return filterFields(rest, fields);
+        const { markdown, ...lite } = rest;
+        return lite;
+      });
       res.json(filteredPosts);
     } catch (err) {
       next(err);
@@ -70,14 +89,12 @@ app.get('/api/posts', async (req, res, next) => {
   app.get('/api/posts/:slug', async (req, res, next) => {
     try {
       const post = await repo.getPost(req.params.slug, { tableName: config.tableName });
-      if (!post) {
+      if (!post || !isVisibleTo(post, req)) {
         return res.status(404).json({ error: 'not found' });
       }
       const html = await renderMarkdown(post.markdown);
       const fields = req.query.fields;
       const filtered = filterFields({
-        feedKey: post.feedKey,
-        chronKey: post.chronKey,
         slug: post.slug,
         title: post.title,
         status: post.status,
@@ -111,6 +128,12 @@ app.get('/api/posts', async (req, res, next) => {
     } catch (err) {
       if (err.message && err.message.includes('slug already exists')) {
         return res.status(409).json({ error: 'slug already exists' });
+      }
+      // Client-side validation failures are 400s, not server errors.
+      if (err.message && (err.message.includes('slug must contain') ||
+          err.message.includes('status must be') ||
+          err.message.includes('is required'))) {
+        return res.status(400).json({ error: err.message });
       }
       next(err);
     }

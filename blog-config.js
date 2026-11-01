@@ -179,10 +179,13 @@ function debugLog(message) {
 
 function createConfig() {
   readLogSetup();
-  const port = parsePort(optionalSourceEnv('PORT', '9999'));
-  const awsRegion = optionalSourceEnv('AWS_REGION', 'us-west-9');
-  const tableName = optionalSourceEnv('DYNAMODB_TABLE_NAME', 'blog-posts');
-  const writeToken = optionalSourceEnv('BLOG_WRITE_TOKEN', 'th_a_secrete_2');
+  const port = parsePort(optionalSourceEnv('PORT', '3000'));
+  // Required vars have no defaults (see header comment): a hard-coded
+  // fallback write token would become the live token on any deploy that
+  // forgets to configure one, so fail startup instead.
+  const awsRegion = requiredSourceEnv('AWS_REGION');
+  const tableName = requiredSourceEnv('DYNAMODB_TABLE_NAME');
+  const writeToken = requiredSourceEnv('BLOG_WRITE_TOKEN');
 
   log('INFO', `blog starting  table=${tableName}  region=${awsRegion}  port=${port}`);
 
