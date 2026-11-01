@@ -45,7 +45,7 @@ api-only-blog/
 └── package.json            ← Dependencies + test script (`node test-harness.js`)
 
 ```
-**69 tests** across **6 suites** all pass (`exit code 0`). The test harness injects Jest-like globals (`describe`, `it`, `expect`, `beforeEach`, `afterEach`).
+**72 tests** across the loadable suites pass (blog-app 31, blog-config 16, blog 5, post-repo 20). Known issue: `render.test.js` currently fails to load with a `SyntaxError` (its content is stored with literal `\n` escapes), which also stops the harness before `slugify.test.js` runs. The test harness injects Jest-like globals (`describe`, `it`, `expect`, `beforeEach`, `afterEach`).
 
 ---
 
@@ -57,9 +57,14 @@ This is the **source of truth** for all configuration. It defines a strict prior
 
 | Priority | Source | Description |
 |----------|--------|-------------|
-| **1** | `process.env` | Local dev environment (highest priority) |
-| **2** | `.env.PROD` | File shipped with deploy (fallback for hosts that don't pass env) |
-| **3** | **Defaults** | Hard-coded values in the code (used when 1 & 2 are absent) |
+| **1** | `config-overrides.js` | Hand-edited JS file shipped with the deploy (highest priority) |
+| **2** | `process.env` | Local dev environment |
+| **3** | `.env.PROD` | File shipped with deploy (fallback for hosts that don't pass env) |
+| **4** | **Defaults** | Hard-coded values in the code — **only for optional vars** (see Required Variables) |
+
+### Required Variables
+
+`AWS_REGION`, `DYNAMODB_TABLE_NAME` and `BLOG_WRITE_TOKEN` are **required**: `createConfig()` reads them with `requiredSourceEnv()` and throws `missing required env var: <name>` at startup if none of the sources above provides a non-empty value. They have no hard-coded defaults on purpose — previously the write token had a hard-coded fallback value in the code, which would silently become the live token on any deploy that forgot to configure one. The fallback was removed; a misconfigured deploy now fails loudly instead.
 
 ### The Override File (`config-overrides.js`)
 
@@ -83,7 +88,7 @@ The test suite **rewrites this file between test cases** to isolate configs. Eac
 | Function | What it does |
 |----------|-------------|
 | `optionalSourceEnv(name, fallback)` | Returns `overrides[name]`, then `process.env[name]`, then `.env.PROD[name]`, then `fallback` |
-| `requiredSourceEnv(name)` | Same as above **but throws** if not found (used for AWS credentials, table name, etc.) |
+| `requiredSourceEnv(name)` | Same as above **but throws** if not found (used for `AWS_REGION`, `DYNAMODB_TABLE_NAME`, `BLOG_WRITE_TOKEN`) |
 | `loadOverrides()` | Loads `config-overrides.js` via `require()`; caches in `_overrides` variable; supports hot-reload by deleting `require.cache` |
 | `parseProdEnvFile(path)` | Parses `.env.PROD` into a key→value map (handles quotes, inline comments, quoted values) |
 | `awsAccessKeyId()`, `awsSecretAccessKey()` | Return **hard-coded fallback credentials** (never require env vars to be set) |
@@ -108,15 +113,15 @@ The default PORT is `3000` (previously `2337`, changed to match test expectation
 
 ```js
 function awsAccessKeyId() {
-  return optionalSourceEnv('AWS_ACCESS_KEY_ID', '111111');
+  return optionalSourceEnv('AWS_ACCESS_KEY_ID', 'this-is');
 }
 
 function awsSecretAccessKey() {
-  return optionalSourceEnv('AWS_SECRET_ACCESS_KEY', '222222');
+  return optionalSourceEnv('AWS_SECRET_ACCESS_KEY', 'myid');
 }
 ```
 
-These hard-coded values serve as defaults when neither `process.env` nor `.env.PROD` provides them.
+The fallback values are placeholders, not real credentials — real keys must come from `config-overrides.js`, `process.env` or `.env.PROD`. (Unlike the write token, these two are not startup-required; a deploy that relies on the placeholders will fail at the first DynamoDB call.)
 
 ---
 
@@ -135,7 +140,7 @@ This module **abstracts DynamoDB interactions**. It's the only place that knows 
 
 | Parameter | Description |
 |-----------|-------------|
-| `opts.tableName` | Required. Table name, falls back to `process.env.BLOG_TABLE_NAME` then `blog-config` default |
+| `opts.tableName` | Required. Table name, falls back to `process.env.BLOG_TABLE_NAME`; throws if neither provides one |
 | `opts.client` | **Optional**. A pre-constructed `DynamoDBDocumentClient`. When provided, the repo uses it directly (for testing). When omitted, lazily creates one via `docClient()`. |
 
 ### Test Hook: `opts.client`
@@ -168,6 +173,10 @@ const published = items.filter((it) => it.status === 'published');
 
 Only items with `status === 'published'` are returned. Drafts are silently dropped.
 
+### Status Validation
+
+`createPost` only accepts `status` values of `draft` or `published` (omitted means `published`). Anything else throws `status must be one of: draft, published`, which the web layer returns as a `400` — a misspelled status used to create a post that silently never appeared in the feed.
+
 ---
 
 ## 4. Web Layer: blog-app.js
@@ -177,26 +186,32 @@ Express app with these routes:
 | Route | Auth | Description |
 |-------|------|-------------|
 | `GET /` | None | Renders HTML feed page (all published posts) |
-| `GET /post/:slug` | None | Renders HTML permalink page |
-| `GET /api/posts` | None | Returns JSON feed array |
-| `GET /api/posts/:slug` | None | Returns JSON single post + rendered HTML |
+| `GET /post/:slug` | None* | Renders HTML permalink page |
+| `GET /api/posts` | None | Returns JSON feed array (light shape, see below) |
+| `GET /api/posts/:slug` | None* | Returns JSON single post + rendered HTML |
 | `POST /api/posts` | **Required** | Creates a post (write token required) |
 | `DELETE /api/posts/:slug` | **Required** | Deletes a post (write token required) |
 
+\* Drafts are private: on the two single-post routes, a post whose `status` is not `published` returns `404` unless the request carries a valid write token — a draft is indistinguishable from a nonexistent post.
+
 ### Write Token Authentication
 
-The `requireWriteToken` middleware checks the `X-Blog-Token` header (or `x-blog-token`) against:
+The `requireWriteToken` middleware checks the `X-Blog-Token` header (or `x-blog-token`) against the app's write token, resolved from:
 
 1. `cfg.writeToken` (passed when creating the app)
 2. `config.writeToken` (from `blog-config` singleton)
 3. `process.env.BLOG_WRITE_TOKEN` (env var)
-4. **Fallback**: hard-coded `token`
 
-If no match → `401 Unauthorized`.
+There is **no hard-coded fallback token**. If no match → `401 Unauthorized`.
+
+### Response Shapes and Errors
+
+- `GET /api/posts` returns the light list shape by default — `{slug, title, status, publishedAt, excerpt, url}` — without the full markdown. The DynamoDB-internal keys `feedKey`/`chronKey` are never exposed. A `?fields=` query parameter can select specific fields (full `markdown`/`html` remain available on the single-post route).
+- `POST /api/posts` errors: missing `title`/`markdown` → `400`; invalid slug → `400` (was `500`); invalid `status` → `400`; duplicate slug → `409`.
 
 ### Markdown Rendering
 
-`renderMarkdown(markdown)` is provided by the caller (the test harness or `blog.js`). It converts markdown → HTML. Used in:
+`renderMarkdown(markdown)` is provided by the caller (the test harness or `blog.js`). It converts markdown → HTML. The renderer (`render.js`) passes its output through a dependency-free `sanitizeHtml()` step: `script`/`style`/`iframe`/`object`/`embed`/`form` elements are removed with their contents, inline event-handler attributes (`onclick`, `onerror`, …) are stripped, and `javascript:`/`vbscript:`/`data:text/html` URLs are removed — raw HTML in a post can no longer execute in a visitor's browser. Used in:
 
 - `renderFeedPage(posts)` — for the homepage excerpt list
 - `renderPostPage(post, html)` — for the full-post permalink
@@ -204,23 +219,7 @@ If no match → `401 Unauthorized`.
 
 ### Render Markdown Capture Pattern
 
-The `renderFeedPage` and `renderPostPage` functions are defined at module scope but need access to the `renderMarkdown` parameter passed to `createApp`. The pattern used:
-
-```js
-let _renderMarkdown = null;
-
-function createApp(repo, renderMarkdown, cfg = {}) {
-  _renderMarkdown = renderMarkdown;
-  // ...rest of app setup
-}
-
-async function renderFeedPage(posts) {
-  const renderMarkdown = _renderMarkdown;
-  // ...use renderMarkdown to render each post's markdown
-}
-```
-
-This ensures the module-level render functions have access to the markdown renderer without requiring callers to pass it through every invocation.
+Inside `createApp`, the injected renderer is captured once as a closure constant (`const _renderMarkdown = renderMarkdown;`). The feed-page renderer is defined inside `createApp` and closes over it; the post-page and not-found renderers are pure module-level functions that receive already-rendered HTML as an argument.
 
 ---
 
@@ -250,17 +249,16 @@ When run as `node blog.js`, `start()` is called automatically. When required by 
 
 The test runner uses **Jest-like globals** (`describe`, `it`, `expect`, `beforeEach`, `afterEach`) injected by the harness. Each suite is a separate `describe` block.
 
-### Test Suites (6 total, all pass)
+### Test Suites (6 files; 72 tests pass, `render.test.js` currently unloadable)
 
 | Suite | Tests | What it covers |
 |-------|-------|----------------|
-| `blog-config.test.js` | — | Default values, env parsing, DEBUG_LOG boolean handling |
-| `blog-config.override.test.js` | 6 | Override file priority, hard-coding subsets, caching |
-| `blog.test.js` | 7 | Config reading, type coercion, DEBUG_LOG "false" behavior, startup log |
-| `blog-app.test.js` | 34 | All Express routes (HTML + JSON), auth, pagination, error handling |
-| `post-repo.test.js` | 19 | DynamoDB CRUD, GSI queries, slug collision, pagination |
-| `render.test.js` | 13 | `renderMarkdown` function behavior |
-| `slugify.test.js` | 7 | Slug validation & generation |
+| `blog-app.test.js` | 31 | All Express routes (HTML + JSON), auth, pagination, error handling |
+| `blog-config.test.js` | 16 | Default values, env parsing, required-var errors, DEBUG_LOG boolean handling |
+| `blog.test.js` | 5 | Config reading, type coercion, DEBUG_LOG "false" behavior, startup log |
+| `post-repo.test.js` | 20 | DynamoDB CRUD, GSI queries, slug collision, pagination |
+| `slugify.test.js` | 7 | Slug validation & generation (runs after `render.test.js` in harness order) |
+| `render.test.js` | — | `renderMarkdown` function behavior — **currently fails to load** (file stored with literal `\n` escapes; `SyntaxError`) |
 
 ### Test Isolation Patterns
 
@@ -330,8 +328,9 @@ HTTP POST /api/posts
      │
      └─> repo.createPost({title, slug, status, markdown})
             │
-            ├─> validateSlug(slug)
-            ├─> slugExists(slug) via GSI query
+            ├─> validateSlug(slug) — invalid slug → 400
+            ├─> validate status ∈ {draft, published} — invalid → 400
+            ├─> slugExists(slug) via GSI query — duplicate → 409
             ├─> makeItem({feedKey, chronKey, ...})
             └─> docClient().send(PutCommand({TableName, Item}))
                  │
@@ -362,8 +361,12 @@ HTTP DELETE /api/posts/my-post
 ### Config Source Priority
 
 ```
-┌─────────────────────┐
-          │  process.env        │  ← LOCAL DEV (highest)
+          ┌─────────────────────┐
+          │ config-overrides.js │  ← DEPLOY FILE (highest)
+          └───────┬─────┬───────┘
+                  │     │
+          ┌───────▼─────▼───────┐
+          │  process.env        │  ← LOCAL DEV
           └───────┬─────┬───────┘
                   │     │
           ┌───────▼─────▼───────┐
@@ -371,11 +374,11 @@ HTTP DELETE /api/posts/my-post
           └───────┬─────┬───────┘
                   │     │
           ┌───────▼─────▼───────┐
-          │  HARD-CODED DEFAULTS│  ← blog-config.js (lowest)
+          │  HARD-CODED DEFAULTS│  ← blog-config.js (optional vars only)
           └─────────────────────┘
 ```
 
-**Override file** `config-overrides.js` sits **above** `process.env` in priority (loaded first, its values are checked before anything else).
+**Override file** `config-overrides.js` sits **above** `process.env` in priority (loaded first, its values are checked before anything else). Required vars (`AWS_REGION`, `DYNAMODB_TABLE_NAME`, `BLOG_WRITE_TOKEN`) have no default at the bottom of the chain — if no source provides one, startup throws.
 
 ### Request Handling Lifecycle
 
@@ -413,6 +416,7 @@ GSI slugIndex:
 
 | Issue | Symptom | Fix |
 |-------|---------|-----|
+| **Missing required config** | Startup throws `missing required env var: ...` | Set `AWS_REGION`, `DYNAMODB_TABLE_NAME` and `BLOG_WRITE_TOKEN` in env, `.env.PROD` or `config-overrides.js` — they have no defaults |
 | **Wrong table name** | `ResourceNotFoundException` | Set `DYNAMODB_TABLE_NAME` in `.env.PROD` or `config-overrides.js` |
 | **Wrong region** | Same error + wrong endpoint | Set `AWS_REGION` in `.env.PROD` or env |
 | **DEBUG_LOG not turning on** | `cfg.debugLog === false` even with `DEBUG_LOG: true` in overrides | The comparison accepts both `'true'` and `true` |
@@ -424,7 +428,7 @@ GSI slugIndex:
 
 ## 10. How to Add a Feature
 
-1. **Config** — Add new env var to `optionalSourceEnv()` or `requiredSourceEnv()` in `blog-config.js`, with a sensible default.
+1. **Config** — Add new env var to `blog-config.js`: `optionalSourceEnv()` with a sensible default, or `requiredSourceEnv()` if the app must not run without it (secrets and resource names belong in the second group).
 2. **Repo** — Add a method to `post-repo.js` following existing patterns (query → put → delete). Remember: `listPosts` filters by `status === 'published'`.
 3. **Routes** — Add new `app.METHOD()` route in `blog-app.js`, reusing `repo` methods and authentication via `requireWriteToken`.
 4. **Markup** — Add rendering logic to `renderFeedPage`, `renderPostPage`, or create new helper. Capture `renderMarkdown` via the `_renderMarkdown` pattern.
@@ -441,7 +445,7 @@ GSI slugIndex:
 | `blog-app` | `createApp` |
 | `post-repo` | `createPostRepo` |
 | `blog` | `app`, `repo`, `start`, `rawClient`, `docClient` |
-| `render` | `renderMarkdown`, `extractExcerpt` |
+| `render` | `renderMarkdown`, `extractExcerpt`, `sanitizeHtml` |
 
 ### `blog.js` Module Export Breakdown
 
